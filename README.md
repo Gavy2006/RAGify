@@ -82,9 +82,13 @@ RAGify is an Android application that allows users to upload PDF documents and i
 
 # 🏗️ System Architecture
 
-> **Architecture Diagram**
+The following diagram illustrates the complete Retrieval-Augmented Generation (RAG) workflow used in **RAGify**, from PDF upload to AI-generated responses.
 
-**(Add architecture image here)**
+<p align="center">
+  <img src="Screenshot%202026-07-29%20162135.png" alt="RAGify Architecture" width="900"/>
+</p>
+
+
 
 ```
                  +-----------------------+
