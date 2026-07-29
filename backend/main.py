@@ -1,81 +1,96 @@
-from fastapi import FastAPI
 from fastapi import FastAPI, File, UploadFile
+from pydantic import BaseModel
+import os
+from gemini import ask_gemini
 from embedding import create_embeddings
 from extract import text_return
 from chunk import chunk_with_overlap
-
-import os
-from pydantic import BaseModel
-from storage import load_index, load_chunks
-from vectordb import search
+from vectordb import create_index, add_embeddings, search
+from storage import (
+    save_index,
+    save_chunks,
+    load_index,
+    load_chunks
+)
+from gemini import ask_gemini
 
 app = FastAPI()
+
 
 class QuestionRequest(BaseModel):
     question: str
 
 
-# yaad decorator , root url "/" pr aaye to nichee wala func do 
-@app.get("/")  
+@app.get("/")
 def read_root():
-    return "hello world" 
+    return "hello world"
 
 
 @app.post("/upload")
-async def upload_pdf(file : UploadFile = File()):
+async def upload_pdf(file: UploadFile = File(...)):
 
+    if not validate(file):
+        return {"error": "Only PDF allowed"}
 
-#validation valid pdf or not ---> Gavy
-   result = validate(file)
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
 
-   if not result :
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-        return {
-        "error": "Only PDF allowed"
+    file_path = os.path.join(UPLOAD_DIR, file.filename)
+
+    content = await file.read()
+
+    with open(file_path, "wb") as f:
+        f.write(content)
+
+    text = text_return(file_path)
+
+    chunks = chunk_with_overlap(text)
+
+    embeddings = create_embeddings(chunks)
+
+    index = create_index(len(embeddings[0]))
+
+    add_embeddings(index, embeddings)
+
+    save_index(index)
+
+    save_chunks(chunks)
+
+    return {
+        "message": "PDF uploaded successfully",
+        "total_chunks": len(chunks),
+        "embedding_dimension": len(embeddings[0])
     }
 
-# if valid give file name ---> Gavy
-   filename = file.filename
-
-# read file ---> Gavy
-
-   content = await file.read()
-
-   BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-   uploaded = os.path.join(BASE_DIR, "upload", filename)
-
-
-   with open(uploaded ,"wb") as f:
-    f.write(content) 
-
-# send file to extract.py 
-   text = text_return(uploaded)
-
-   chunks = chunk_with_overlap(text)
-
-   embeddings = create_embeddings(chunks)
-
-
-
-   return {
-    "total_chunks": len(chunks),
-    "embedding_dimension": len(embeddings[0]) if embeddings is not None and len(embeddings) > 0 else 0
-}
 
 @app.post("/ask")
 def ask(request: QuestionRequest):
+
     query_embedding = create_embeddings([request.question])
 
     index = load_index()
 
     distances, indices = search(index, query_embedding)
-    
 
-def validate(file :UploadFile) :
-        if(file.content_type != "application/pdf" ) :
-            return False
+    chunks = load_chunks()
 
-        else :
-            return True
+    relevant_chunks = []
 
+    for i in indices[0]:
+        relevant_chunks.append(chunks[i])
+
+    context = "\n\n".join(relevant_chunks)
+
+    answer = ask_gemini(context, request.question)
+
+    return {
+        "question": request.question,
+        "answer": answer,
+        "relevant_chunks": relevant_chunks
+    }
+
+
+def validate(file: UploadFile):
+    return file.content_type == "application/pdf"
